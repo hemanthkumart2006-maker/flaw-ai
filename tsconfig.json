@@ -18,6 +18,12 @@
     "paths": {
       "@/*": [
         "./*"
+      ],
+      "@frontend/*": [
+        "./frontend/*"
+      ],
+      "@backend/*": [
+        "./backend/*"
       ]
     },
     "allowImportingTsExtensions": true,

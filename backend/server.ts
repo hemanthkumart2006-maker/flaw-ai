@@ -57,7 +57,10 @@ import {
   getToolExecutionLogsFromDB
 } from "./services/database.js";
 
-dotenv.config();
+// Load environment variables from root .env
+dotenv.config({ path: path.resolve(process.cwd(), ".env") });
+
+import { authenticateToken, requireAuth } from "./middleware/auth.js";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -69,33 +72,6 @@ app.use(express.urlencoded({ limit: "50mb", extended: true }));
 // Serve uploaded attachments statically
 const uploadsDir = path.join(process.cwd(), "uploads");
 app.use("/uploads", express.static(uploadsDir));
-
-// Auth Middleware (Optional / Token Inspector)
-function authenticateToken(req: any, res: any, next: any) {
-  const authHeader = req.headers["authorization"];
-  const token = authHeader && authHeader.split(" ")[1];
-
-  if (!token) {
-    req.user = null;
-    return next();
-  }
-
-  jwt.verify(token, JWT_SECRET, (err: any, user: any) => {
-    if (err) {
-      req.user = null;
-    } else {
-      req.user = user;
-    }
-    next();
-  });
-}
-
-function requireAuth(req: any, res: any, next: any) {
-  if (!req.user) {
-    return res.status(401).json({ error: "Authentication required" });
-  }
-  next();
-}
 
 app.use(authenticateToken);
 

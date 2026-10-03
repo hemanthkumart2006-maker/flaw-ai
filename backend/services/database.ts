@@ -189,7 +189,10 @@ export async function initDatabase(): Promise<{ isPostgres: boolean; message: st
       try {
         await client.query("SELECT 1");
         // Run all migration schemas in sorted order
-        const migrationsDir = path.join(process.cwd(), "database", "migrations");
+        let migrationsDir = path.join(process.cwd(), "database", "migrations");
+        if (!fs.existsSync(migrationsDir)) {
+          migrationsDir = path.resolve(__dirname, "../../database/migrations");
+        }
         if (fs.existsSync(migrationsDir)) {
           const files = fs.readdirSync(migrationsDir).filter(f => f.endsWith(".sql")).sort();
           for (const file of files) {
