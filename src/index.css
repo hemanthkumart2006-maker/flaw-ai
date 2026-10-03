@@ -1,0 +1,99 @@
+@import "tailwindcss";
+
+:root {
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-display: "Outfit", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+/* Custom Scrollbars */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* Theme variables */
+:root {
+  --app-bg: #0a0a0c;
+  --app-card: #121216;
+  --app-border: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="midnight"] {
+  --app-bg: #030712;
+  --app-card: #0b132b;
+  --app-border: rgba(59, 130, 246, 0.15);
+}
+
+[data-theme="cyberpunk"] {
+  --app-bg: #0d0221;
+  --app-card: #190933;
+  --app-border: rgba(244, 63, 94, 0.2);
+}
+
+/* Markdown styling improvements */
+.markdown-body pre {
+  margin: 0 !important;
+  background: transparent !important;
+}
+
+.markdown-body p {
+  margin-bottom: 0.6em;
+}
+.markdown-body p:last-child {
+  margin-bottom: 0;
+}
+
+.markdown-body ul, .markdown-body ol {
+  padding-left: 1.25rem;
+  margin-bottom: 0.6em;
+}
+.markdown-body ul {
+  list-style-type: disc;
+}
+.markdown-body ol {
+  list-style-type: decimal;
+}
+
+.markdown-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.75rem 0;
+  font-size: 0.825rem;
+}
+.markdown-body th, .markdown-body td {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 0.4rem 0.75rem;
+  text-align: left;
+}
+.markdown-body th {
+  background: rgba(255, 255, 255, 0.05);
+  font-weight: 600;
+}
+
+.markdown-body blockquote {
+  border-left: 3px solid #6366f1;
+  padding-left: 0.75rem;
+  color: #94a3b8;
+  font-style: italic;
+  margin: 0.6rem 0;
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Flaw AI Ultra",
+  "description": "The ultimate AI suite with Flash 2.0 and Pro 1.5 models, high-performance web browsing, vision, voice input, and professional-grade code execution environment.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
