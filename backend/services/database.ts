@@ -2,16 +2,14 @@ import pg from "pg";
 import crypto from "crypto";
 import fs from "fs";
 import path from "path";
-import dotenv from "dotenv";
-
-dotenv.config();
+import { ENCRYPTION_SECRET, IS_PRODUCTION } from "../config/env.js";
 
 const { Pool } = pg;
 
 // AES-256-GCM Encryption for API Keys
 const ENCRYPTION_KEY = crypto
   .createHash("sha256")
-  .update(process.env.ENCRYPTION_SECRET || "flaw-ai-ultra-secure-master-encryption-key-2026")
+  .update(ENCRYPTION_SECRET)
   .digest(); // 32 bytes
 
 export function encryptSecret(plainText: string): string {
@@ -171,6 +169,13 @@ let localStore: StoreData = loadLocalStore();
 export async function initDatabase(): Promise<{ isPostgres: boolean; message: string }> {
   const dbUrl = process.env.DATABASE_URL;
 
+  // In production, reject startup if database credentials are not configured
+  if (IS_PRODUCTION && !dbUrl && !process.env.PGHOST && !process.env.PGUSER) {
+    throw new Error(
+      "[Database Fatal] DATABASE_URL (or PGHOST/PGUSER) is required in production mode. Refusing to boot with in-memory fallback."
+    );
+  }
+
   // Attempt PostgreSQL connection if DATABASE_URL or PG environment is configured
   if (dbUrl || process.env.PGHOST || process.env.PGUSER) {
     try {
@@ -208,12 +213,20 @@ export async function initDatabase(): Promise<{ isPostgres: boolean; message: st
         client.release();
       }
     } catch (err: any) {
+      if (IS_PRODUCTION) {
+        console.error("[Database Fatal] PostgreSQL connection or migration failed in production:", err.message);
+        throw new Error(`[Database Fatal] Production database unavailable: ${err.message}`);
+      }
       console.warn("[Database] PostgreSQL connection failed. Falling back to persistent storage engine:", err.message);
       isPostgresAvailable = false;
       pgPool = null;
     }
   } else {
-    console.log("[Database] No DATABASE_URL specified. Initializing persistent file-backed database engine.");
+    console.log("[Database] No DATABASE_URL specified. Initializing persistent file-backed database engine (development mode only).");
+  }
+
+  if (IS_PRODUCTION) {
+    throw new Error("[Database Fatal] PostgreSQL connection could not be established in production mode.");
   }
 
   isPostgresAvailable = false;

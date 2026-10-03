@@ -1,6 +1,5 @@
 import jwt from "jsonwebtoken";
-
-const JWT_SECRET = process.env.JWT_SECRET || "flaw-ai-ultra-jwt-secret-key-2026";
+import { JWT_SECRET } from "../config/env.js";
 
 export function authenticateToken(req: any, res: any, next: any) {
   const authHeader = req.headers["authorization"];

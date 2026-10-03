@@ -57,14 +57,11 @@ import {
   getToolExecutionLogsFromDB
 } from "./services/database.js";
 
-// Load environment variables from root .env
-dotenv.config({ path: path.resolve(process.cwd(), ".env") });
-
+import { JWT_SECRET, PORT, IS_PRODUCTION } from "./config/env.js";
 import { authenticateToken, requireAuth } from "./middleware/auth.js";
+import { authRateLimiter, chatRateLimiter } from "./middleware/rateLimiter.js";
 
 const app = express();
-const PORT = process.env.PORT || 3000;
-const JWT_SECRET = process.env.JWT_SECRET || "flaw-ai-ultra-jwt-secret-key-2026";
 
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
@@ -79,7 +76,7 @@ app.use(authenticateToken);
 // 1. Authentication Endpoints
 // ==========================================
 
-app.post("/api/auth/register", async (req, res) => {
+app.post("/api/auth/register", authRateLimiter, async (req, res) => {
   try {
     const { name, email, password } = req.body;
     if (!name || !email || !password) {
@@ -110,7 +107,7 @@ app.post("/api/auth/register", async (req, res) => {
   }
 });
 
-app.post("/api/auth/login", async (req, res) => {
+app.post("/api/auth/login", authRateLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) {
@@ -722,7 +719,7 @@ app.get("/api/mcp/logs", async (req: any, res) => {
 // 5. Main Chat API Endpoint (Multimodal + Attachments + Tools + Fallback)
 // ==========================================
 
-app.post("/api/chat", async (req: any, res) => {
+app.post("/api/chat", chatRateLimiter, async (req: any, res) => {
   const requestStartTime = Date.now();
   try {
     const { 
@@ -1006,7 +1003,11 @@ async function startServer() {
     const dbStatus = await initDatabase();
     console.log(`[Database Initialized]: ${dbStatus.message}`);
   } catch (err: any) {
-    console.error("[Database Init Warning]:", err.message);
+    console.error("[Database Init Error]:", err.message);
+    if (IS_PRODUCTION) {
+      console.error("[FATAL] Production database initialization failed. Exiting process.");
+      process.exit(1);
+    }
   }
 
   // Initialize and register MCP servers
