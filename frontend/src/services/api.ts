@@ -22,16 +22,20 @@ export async function fetchSystemStatus(): Promise<SystemCapabilityStatus> {
   };
 }
 
-export async function transcribeAudio(audioData: string, mimeType: string = "audio/webm"): Promise<string> {
+export async function transcribeAudio(
+  audioData: string, 
+  mimeType: string = "audio/webm",
+  languageCode?: string
+): Promise<string> {
   const res = await fetch("/api/stt", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ audioData, mimeType }),
+    body: JSON.stringify({ audioData, mimeType, languageCode }),
   });
 
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: "STT Request failed" }));
-    throw new Error(err.error || "STT failed");
+    const err = await res.json().catch(() => ({ error: `STT Request failed (${res.status})` }));
+    throw new Error(err.error || `Transcription failed with status ${res.status}`);
   }
 
   const data = await res.json();

@@ -13,10 +13,15 @@ import {
   Square,
   Monitor,
   FileText,
-  FileCode
+  FileCode,
+  CheckCircle2,
+  AlertCircle,
+  Radio,
+  PhoneOff,
+  VolumeX
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { VoiceMode } from "../types";
+import { VoiceMode, VoiceInputStatus, LiveKitVoiceState } from "../types";
 
 export interface AttachedFileItem {
   id: string;
@@ -39,10 +44,20 @@ interface ChatInputProps {
   isLoading: boolean;
   isListening: boolean;
   isProcessingVoice: boolean;
+  voiceStatus?: VoiceInputStatus;
+  voiceError?: string | null;
   audioLevel: number;
   onToggleListening: () => void;
   voiceMode: VoiceMode;
   toolStatus?: string | null;
+  livekitConnected?: boolean;
+  livekitConnecting?: boolean;
+  livekitState?: LiveKitVoiceState;
+  livekitAudioLevel?: number;
+  livekitMuted?: boolean;
+  onToggleLiveKit?: () => void;
+  onToggleLiveKitMute?: () => void;
+  onInterruptLiveKit?: () => void;
 }
 
 export const ChatInput: React.FC<ChatInputProps> = ({
@@ -57,10 +72,20 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   isLoading,
   isListening,
   isProcessingVoice,
+  voiceStatus = "idle",
+  voiceError,
   audioLevel,
   onToggleListening,
   voiceMode,
   toolStatus,
+  livekitConnected = false,
+  livekitConnecting = false,
+  livekitState = "IDLE",
+  livekitAudioLevel = 0,
+  livekitMuted = false,
+  onToggleLiveKit,
+  onToggleLiveKitMute,
+  onInterruptLiveKit,
 }) => {
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -179,20 +204,68 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   return (
     <div className="p-4 md:p-6 bg-gradient-to-t from-[#0d0d0d] via-[#0d0d0d]/90 to-transparent relative z-20">
       <div className="max-w-3xl mx-auto relative">
-        {/* Subtle Tool Status Indicator */}
-        <AnimatePresence>
-          {(isLoading || toolStatus) && (
-            <motion.div
-              initial={{ opacity: 0, y: 5 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 5 }}
-              className="absolute -top-7 left-4 flex items-center gap-2 text-xs font-semibold text-indigo-400 bg-[#161619] px-3 py-1 rounded-t-xl border-t border-x border-white/10 shadow"
-            >
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              <span>{toolStatus || "Generating..."}</span>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {/* Subtle Tool Status Indicator & Voice Status Indicator */}
+        <div className="flex items-center justify-between">
+          <AnimatePresence>
+            {(isLoading || toolStatus) && (
+              <motion.div
+                initial={{ opacity: 0, y: 5 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 5 }}
+                className="absolute -top-7 left-4 flex items-center gap-2 text-xs font-semibold text-indigo-400 bg-[#161619] px-3 py-1 rounded-t-xl border-t border-x border-white/10 shadow"
+              >
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>{toolStatus || "Generating..."}</span>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <AnimatePresence>
+            {voiceError ? (
+              <motion.div
+                initial={{ opacity: 0, y: 5 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 5 }}
+                className="absolute -top-7 right-4 flex items-center gap-1.5 text-xs font-semibold text-rose-300 bg-rose-950/90 border-t border-x border-rose-500/40 px-3 py-1 rounded-t-xl shadow z-30"
+              >
+                <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                <span className="truncate max-w-[260px] sm:max-w-[420px]">{voiceError}</span>
+              </motion.div>
+            ) : voiceStatus && voiceStatus !== "idle" ? (
+              <motion.div
+                initial={{ opacity: 0, y: 5 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 5 }}
+                className="absolute -top-7 right-4 flex items-center gap-2 text-xs font-semibold px-3 py-1 rounded-t-xl border-t border-x shadow z-30 bg-[#161619] border-white/10"
+              >
+                {voiceStatus === "listening" && (
+                  <>
+                    <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
+                    <span className="text-red-400">Listening...</span>
+                  </>
+                )}
+                {voiceStatus === "processing" && (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
+                    <span className="text-amber-400">Processing audio...</span>
+                  </>
+                )}
+                {voiceStatus === "transcribing" && (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-400" />
+                    <span className="text-indigo-400">Transcribing with Sarvam Saaras...</span>
+                  </>
+                )}
+                {voiceStatus === "done" && (
+                  <>
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                    <span className="text-emerald-400">Done</span>
+                  </>
+                )}
+              </motion.div>
+            ) : null}
+          </AnimatePresence>
+        </div>
 
         {/* Attachment Previews Grid (Images + Documents) */}
         <AnimatePresence>
@@ -282,7 +355,11 @@ export const ChatInput: React.FC<ChatInputProps> = ({
             }}
             placeholder={
               isListening 
-                ? "Listening to your voice..." 
+                ? "Listening to your voice... (Click mic when finished)" 
+                : voiceStatus === "processing"
+                ? "Processing recorded audio..."
+                : voiceStatus === "transcribing"
+                ? "Transcribing with Sarvam Saaras STT..."
                 : totalAttachments > 0 
                 ? "Type instructions for attached file(s) (e.g. 'Summarize this', 'Find errors')..." 
                 : "Ask Flaw AI Ultra..."
@@ -343,11 +420,17 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                 className={`p-2.5 rounded-xl transition-all flex items-center gap-2 ${
                   isListening
                     ? "bg-red-500 text-white shadow-lg shadow-red-500/30 animate-pulse"
-                    : isProcessingVoice
+                    : isProcessingVoice || voiceStatus === "transcribing" || voiceStatus === "processing"
                     ? "bg-amber-500 text-black shadow-lg"
                     : "hover:bg-white/10 text-slate-400 hover:text-white"
                 }`}
-                title="Voice Input (Sarvam Saaras v3 STT)"
+                title={
+                  isListening
+                    ? "Listening... Click to stop and transcribe"
+                    : isProcessingVoice || voiceStatus === "transcribing" || voiceStatus === "processing"
+                    ? "Transcribing with Sarvam Saaras STT..."
+                    : "Voice Input (Sarvam Saaras STT)"
+                }
               >
                 {isProcessingVoice ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
@@ -364,6 +447,85 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                   <Mic className="w-4 h-4" />
                 )}
               </button>
+
+              {/* Realtime Live Voice (LiveKit WebRTC AI Voice Agent) */}
+              {onToggleLiveKit && (
+                <>
+                  <div className="h-4 w-px bg-white/10 mx-0.5" />
+                  {livekitConnected ? (
+                    <div className="flex items-center gap-1.5 bg-red-500/10 border border-red-500/30 rounded-xl px-2 py-1 shadow-md">
+                      {/* LIVE State Indicator */}
+                      <div className="flex items-center gap-1.5 text-xs font-bold text-red-400">
+                        <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                        <span className="text-[11px] font-mono tracking-wider font-extrabold uppercase">
+                          {livekitState}
+                        </span>
+                      </div>
+
+                      {/* Live Audio Visualizer Dots */}
+                      <div className="flex items-end gap-0.5 h-3 px-1">
+                        <div className="w-1 bg-red-400 rounded-full transition-all" style={{ height: `${Math.max(20, livekitAudioLevel)}%` }} />
+                        <div className="w-1 bg-red-400 rounded-full transition-all" style={{ height: `${Math.max(40, livekitAudioLevel * 1.3)}%` }} />
+                        <div className="w-1 bg-red-400 rounded-full transition-all" style={{ height: `${Math.max(15, livekitAudioLevel * 0.7)}%` }} />
+                      </div>
+
+                      {/* Mute/Unmute */}
+                      {onToggleLiveKitMute && (
+                        <button
+                          onClick={onToggleLiveKitMute}
+                          className={`p-1.5 rounded-lg transition-colors ${livekitMuted ? "bg-amber-500/20 text-amber-300" : "hover:bg-white/10 text-slate-300 hover:text-white"}`}
+                          title={livekitMuted ? "Unmute Microphone" : "Mute Microphone"}
+                        >
+                          {livekitMuted ? <VolumeX className="w-3.5 h-3.5 text-amber-400" /> : <Mic className="w-3.5 h-3.5" />}
+                        </button>
+                      )}
+
+                      {/* Interrupt Agent if speaking */}
+                      {livekitState === "SPEAKING" && onInterruptLiveKit && (
+                        <button
+                          onClick={onInterruptLiveKit}
+                          className="px-2 py-0.5 bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-[10px] rounded-lg transition-all shadow active:scale-95"
+                          title="Interrupt AI Speaking (Barge-in)"
+                        >
+                          Interrupt
+                        </button>
+                      )}
+
+                      {/* Disconnect Live Voice */}
+                      <button
+                        onClick={onToggleLiveKit}
+                        className="p-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-300 hover:text-red-200 transition-colors ml-0.5"
+                        title="End Realtime Voice Session"
+                      >
+                        <PhoneOff className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={onToggleLiveKit}
+                      disabled={livekitConnecting}
+                      className={`px-2.5 py-1.5 rounded-xl transition-all flex items-center gap-1.5 text-xs font-semibold border ${
+                        livekitConnecting
+                          ? "bg-indigo-500/20 text-indigo-300 border-indigo-500/30"
+                          : "bg-white/5 hover:bg-indigo-500/15 text-slate-300 hover:text-indigo-300 border-white/10 hover:border-indigo-500/30 shadow-sm"
+                      }`}
+                      title="Start Realtime Voice (LiveKit Room + AI Agent)"
+                    >
+                      {livekitConnecting ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-400" />
+                          <span className="text-[11px]">Connecting...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Radio className="w-3.5 h-3.5 text-indigo-400" />
+                          <span className="text-[11px] font-bold">Live Voice</span>
+                        </>
+                      )}
+                    </button>
+                  )}
+                </>
+              )}
             </div>
 
             <div className="flex items-center gap-2">

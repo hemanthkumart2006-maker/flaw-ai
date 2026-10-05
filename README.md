@@ -76,10 +76,121 @@ flaw-ai/
 - Role-based permissions and encrypted credential storage in PostgreSQL.
 
 ### 3. Voice & 3D Intelligence
+- **Real-Time LiveKit Voice**: Ultra low-latency WebRTC bidirectional voice room with live AI Voice Agent.
+- **Normal Voice Input (Sarvam Saaras STT)**: High-accuracy batch transcription for multi-lingual and English voice input directly into chat.
 - **F.R.I.D.A.Y. Hands-Free Conversational Mode**: Continuous voice conversation with Voice Activity Detection (VAD).
-- **Speech-to-Text (STT)**: High-accuracy transcription powered by Sarvam AI.
-- **Text-to-Speech (TTS)**: Low-latency streaming speech powered by OpenAI TTS.
-- **Interactive 3D Anime Assistant**: Three.js-powered character that reacts dynamically to voice and generation states.
+- **Text-to-Speech (TTS)**: Low-latency streaming speech powered by OpenAI TTS with browser speech synthesis fallback.
+- **Interactive 3D Anime Assistant**: Three.js-powered character that reacts dynamically to voice, speaking amplitude, and generation states.
+
+---
+
+## 🎙️ LiveKit Real-Time Voice
+
+fLAW AI includes a complete **Real-Time Voice Architecture** powered by LiveKit WebRTC and an AI Voice Agent pipeline.
+
+### Architecture Overview
+
+```
+User (Microphone)
+       │
+       ▼ (WebRTC Audio Track)
+fLAW AI Frontend (livekit-client)
+       │
+       ▼ (WebRTC Signaling & Transport)
+  LiveKit Room
+       │
+       ▼ (Low-Latency Audio Stream)
+LiveKit AI Voice Agent (backend/voice-agent/)
+       │
+       ├─► STT Provider (Sarvam Saaras STT / Streaming Adapter)
+       │
+       ├─► LLM Provider Manager (Gemini / Qwen / OpenAI)
+       │         │
+       │         ▼
+       │   CentralToolManager (Built-in Tools & User MCP Servers)
+       │
+       └─► TTS Provider (OpenAI Realtime TTS / Browser Fallback)
+                 │
+                 ▼ (WebRTC Audio Output)
+         LiveKit Room Audio Track
+                 │
+                 ▼
+        Frontend Speakers & 3D Anime Lip-Sync
+```
+
+### 1. What LiveKit Does
+[LiveKit](https://livekit.io/) is an open-source WebRTC infrastructure designed for ultra-low latency audio, video, and data communication. In fLAW AI, LiveKit provides:
+- Bidirectional WebRTC audio channels between the browser and backend.
+- Sub-second round-trip voice interaction with interruption/barge-in support.
+- Synchronized participant data channel messages for real-time state and transcripts.
+- Strict room isolation and cryptographically signed participant tokens.
+
+### 2. Normal Voice vs Real-Time Live Voice
+fLAW AI provides two distinct, non-conflicting voice workflows:
+
+| Feature | Normal Voice Input | Real-Time Live Voice (LiveKit) |
+| :--- | :--- | :--- |
+| **Transport** | HTTP POST `/api/stt` (FormData) | LiveKit WebRTC Room (`wss://...`) |
+| **Trigger** | Click mic icon in chat input bar | Click "Live Voice" button or F.R.I.D.A.Y. mode |
+| **STT Engine** | Sarvam Saaras v4 Batch STT | LiveKit STT Provider Pipeline |
+| **LLM Output** | Markdown text & code streams to chat | Spoken conversational response |
+| **Audio Output** | Audio playback on demand | Streamed directly into WebRTC audio room |
+| **Barge-In** | Manual stop | Speak at any time to interrupt AI speech |
+| **3D Assistant** | Listens during recording | Mouth opening reacts to real audio amplitude |
+
+### 3. Required Environment Variables
+Add the following optional variables to your `.env` file:
+```env
+LIVEKIT_URL="wss://your-project.livekit.cloud"
+LIVEKIT_API_KEY="your_livekit_api_key"
+LIVEKIT_API_SECRET="your_livekit_api_secret"
+```
+> **Graceful Degradation**: If credentials are not configured, fLAW AI reports `LiveKit: Not Configured`. The normal application, chat, Sarvam STT, and MCP tools run completely normally without errors.
+
+### 4. How to Create a LiveKit Project
+1. Sign up for a free account at [LiveKit Cloud](https://cloud.livekit.io/).
+2. Create a project (e.g. `flaw-ai-voice`).
+3. In **Settings** > **Keys**, generate an API key and secret.
+4. Copy the **WebSocket URL**, **API Key**, and **API Secret**.
+
+### 5. How to Configure Credentials
+1. Open `.env` in the root of the project.
+2. Add your `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET`.
+3. Restart the server (`npm run dev`). System status will automatically display `LiveKit: Ready`.
+
+### 6. How to Start the Agent
+- **Embedded Mode (Default)**: Automatically runs in `backend/server.ts` when credentials are configured.
+- **Standalone Worker Mode**: Run in a separate terminal:
+  ```bash
+  npx tsx backend/voice-agent/agent.ts
+  ```
+
+### 7. How Frontend Connects
+1. User clicks **"Live Voice"** in the chat input bar or opens the voice assistant.
+2. Frontend requests a token from `POST /api/livekit/token` with user authentication.
+3. Backend validates session, assigns deterministic room `flaw-{userId}-{conversationId}`, and issues an official LiveKit `AccessToken`.
+4. `livekit-client` connects to the room, publishes local microphone audio, and subscribes to remote agent audio.
+
+### 8. How the Agent Processes Voice
+1. **Audio Ingestion**: Audio frames arrive via WebRTC room track.
+2. **STT Transcription**: Processed via `LiveKitSTTProvider` (Sarvam Saaras STT or streaming adapter).
+3. **LLM Generation**: Transcribed text queries the active LLM (Gemini, Qwen, or OpenAI) using a voice-optimized conversational system prompt.
+4. **Tool Execution**: Tools are executed through `CentralToolManager`, formatting summaries for natural speech.
+5. **Speech Synthesis**: Response is synthesized via `LiveKitTTSProvider` (OpenAI TTS) and published into the room.
+6. **Barge-in / Interruption**: If user speaks while AI is speaking, an `AbortController` halts LLM generation and room playback instantly, returning to `LISTENING`.
+7. **Persistence**: User and assistant transcripts are saved directly to PostgreSQL `messages` table.
+
+### 9. MCP (Model Context Protocol) Integration
+The voice agent shares the **exact same `CentralToolManager`** as chat:
+- Access to `web_search`, `get_world_news`, `get_current_time`, `get_system_info`, `execute_code`, and all connected user MCP servers.
+- Strictly respects user permissions (`AUTO`, `ASK`, `BLOCK`).
+- All tool executions are logged into PostgreSQL `tool_execution_logs`.
+
+### 10. Troubleshooting
+- **LiveKit: Not Configured**: Add `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` to `.env`.
+- **HTTP 503 Service Unavailable**: Token requested before credentials are configured.
+- **Microphone Permission Denied**: Check browser settings and grant microphone access.
+- **No Sound from AI**: Verify `OPENAI_API_KEY` is configured for OpenAI TTS. When unavailable, browser Web Speech API acts as fallback.
 
 ### 4. Enterprise Security & Hardening
 - **AES-256-GCM Secret Encryption**: Server-side credentials, custom MCP tokens, and user API keys are encrypted at rest.

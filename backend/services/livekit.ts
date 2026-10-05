@@ -1,70 +1,126 @@
 import dotenv from "dotenv";
+import { AccessToken } from "livekit-server-sdk";
+
 dotenv.config();
 
-export function getLiveKitConfigStatus() {
-  const url = process.env.LIVEKIT_URL;
-  const key = process.env.LIVEKIT_API_KEY;
-  const secret = process.env.LIVEKIT_API_SECRET;
+export interface LiveKitConfigStatus {
+  isConfigured: boolean;
+  url: string | null;
+  hasKey: boolean;
+  hasSecret: boolean;
+}
+
+/**
+ * Returns configuration status of LiveKit without exposing secrets.
+ */
+export function getLiveKitConfigStatus(): LiveKitConfigStatus {
+  const url = process.env.LIVEKIT_URL?.trim();
+  const key = process.env.LIVEKIT_API_KEY?.trim();
+  const secret = process.env.LIVEKIT_API_SECRET?.trim();
+
+  const isConfigured = Boolean(
+    url &&
+    key &&
+    secret &&
+    !key.startsWith("YOUR_") &&
+    !secret.startsWith("YOUR_") &&
+    url.length > 5 &&
+    key.length > 3 &&
+    secret.length > 5
+  );
 
   return {
-    isConfigured: Boolean(url && key && secret),
-    url: url || null,
+    isConfigured,
+    url: isConfigured ? url : null,
+    hasKey: Boolean(key && !key.startsWith("YOUR_")),
+    hasSecret: Boolean(secret && !secret.startsWith("YOUR_")),
   };
 }
 
-export async function createLiveKitToken(roomName: string, identity: string): Promise<{ token: string; url: string }> {
+export interface LiveKitTokenOptions {
+  roomName: string;
+  identity: string;
+  name?: string;
+  metadata?: Record<string, any>;
+  ttlSeconds?: number;
+  canPublish?: boolean;
+  canSubscribe?: boolean;
+}
+
+/**
+ * Generates a secure, deterministic room name for a user conversation.
+ * Example: flaw-user123-conv456
+ */
+export function generateVoiceRoomName(userId: string | null | undefined, conversationId?: string | null): string {
+  const safeUser = (userId || "guest").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 32);
+  const safeConv = (conversationId || "main").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 32);
+  return `flaw-${safeUser}-${safeConv}`;
+}
+
+/**
+ * Generates a LiveKit Access Token using the official livekit-server-sdk.
+ * Compatible with both parameter signatures:
+ * 1. createLiveKitToken(roomName, identity)
+ * 2. createLiveKitToken({ roomName, identity, ... })
+ */
+export async function createLiveKitToken(
+  optionsOrRoomName: string | LiveKitTokenOptions,
+  identityArg?: string
+): Promise<{ token: string; url: string; roomName: string; identity: string }> {
   const { isConfigured, url } = getLiveKitConfigStatus();
   if (!isConfigured || !url) {
-    throw new Error("LiveKit environment variables (LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET) are not fully configured.");
+    const err = new Error("LiveKit environment variables (LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET) are not fully configured.");
+    (err as any).code = "LIVEKIT_NOT_CONFIGURED";
+    (err as any).statusCode = 503;
+    throw err;
   }
 
-  // Create a minimal JWT token for LiveKit WebRTC connection
-  const apiKey = process.env.LIVEKIT_API_KEY!;
-  const apiSecret = process.env.LIVEKIT_API_SECRET!;
+  const apiKey = process.env.LIVEKIT_API_KEY!.trim();
+  const apiSecret = process.env.LIVEKIT_API_SECRET!.trim();
 
-  // Header
-  const header = { alg: "HS256", typ: "JWT" };
+  let roomName: string;
+  let identity: string;
+  let name: string | undefined;
+  let metadata: Record<string, any> | undefined;
+  let ttlSeconds: number = 3600; // 1-hour short-lived participant token
+  let canPublish: boolean = true;
+  let canSubscribe: boolean = true;
 
-  // Payload with 6 hour expiration
-  const now = Math.floor(Date.now() / 1000);
-  const payload = {
-    iss: apiKey,
-    sub: identity,
-    nbf: now,
-    exp: now + 24 * 60 * 60,
-    video: {
-      room: roomName,
-      roomJoin: true,
-      canPublish: true,
-      canSubscribe: true,
-    },
-  };
+  if (typeof optionsOrRoomName === "string") {
+    roomName = optionsOrRoomName;
+    identity = identityArg || `user-${Date.now()}`;
+  } else {
+    roomName = optionsOrRoomName.roomName;
+    identity = optionsOrRoomName.identity;
+    name = optionsOrRoomName.name;
+    metadata = optionsOrRoomName.metadata;
+    if (optionsOrRoomName.ttlSeconds) ttlSeconds = optionsOrRoomName.ttlSeconds;
+    if (optionsOrRoomName.canPublish !== undefined) canPublish = optionsOrRoomName.canPublish;
+    if (optionsOrRoomName.canSubscribe !== undefined) canSubscribe = optionsOrRoomName.canSubscribe;
+  }
 
-  // Base64URL encode
-  const encodeBase64Url = (obj: object) => {
-    const jsonStr = JSON.stringify(obj);
-    const base64 = Buffer.from(jsonStr).toString("base64");
-    return base64.replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
-  };
+  // Create token with livekit-server-sdk
+  const at = new AccessToken(apiKey, apiSecret, {
+    identity,
+    name: name || identity,
+    ttl: `${ttlSeconds}s`,
+    metadata: metadata ? JSON.stringify(metadata) : undefined,
+  });
 
-  const encodedHeader = encodeBase64Url(header);
-  const encodedPayload = encodeBase64Url(payload);
-  const tokenData = `${encodedHeader}.${encodedPayload}`;
+  at.addGrant({
+    room: roomName,
+    roomJoin: true,
+    canPublish,
+    canSubscribe,
+    canPublishData: true,
+  });
 
-  // Signature using HMAC SHA-256
-  const crypto = await import("crypto");
-  const signature = crypto
-    .createHmac("sha256", apiSecret)
-    .update(tokenData)
-    .digest("base64")
-    .replace(/=/g, "")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_");
-
-  const token = `${tokenData}.${signature}`;
+  const token = await at.toJwt();
 
   return {
     token,
     url,
+    roomName,
+    identity,
   };
 }

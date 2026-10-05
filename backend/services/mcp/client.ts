@@ -20,6 +20,9 @@ export class MCPClientInstance {
 
   constructor(config: MCPServerConfig) {
     this.config = config;
+    if (config.tools && Array.isArray(config.tools) && config.tools.length > 0) {
+      this.tools = [...config.tools];
+    }
   }
 
   public getConfig(): MCPServerConfig {

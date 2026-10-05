@@ -670,7 +670,7 @@ export async function getMCPServersFromDB(userId?: string | null): Promise<any[]
              FROM mcp_servers ORDER BY created_at ASC`
           );
 
-      return res.rows.map(r => ({
+      const servers = res.rows.map(r => ({
         id: r.id,
         userId: r.user_id,
         name: r.name,
@@ -684,7 +684,41 @@ export async function getMCPServersFromDB(userId?: string | null): Promise<any[]
         timeoutMs: r.timeout_ms,
         createdAt: r.created_at,
         updatedAt: r.updated_at,
+        tools: [] as any[],
       }));
+
+      // Load persisted tools for each server from mcp_tools
+      if (servers.length > 0) {
+        try {
+          const serverIds = servers.map(s => s.id);
+          const toolsRes = await pgPool.query(
+            `SELECT id, server_id, name, description, input_schema, enabled FROM mcp_tools WHERE server_id = ANY($1::uuid[])`,
+            [serverIds]
+          );
+          const toolsByServer = new Map<string, any[]>();
+          for (const t of toolsRes.rows) {
+            if (!toolsByServer.has(t.server_id)) {
+              toolsByServer.set(t.server_id, []);
+            }
+            toolsByServer.get(t.server_id)!.push({
+              id: `${t.server_id}:${t.name}`,
+              name: t.name,
+              description: t.description || undefined,
+              inputSchema: t.input_schema || {},
+              serverId: t.server_id,
+              enabled: t.enabled !== false,
+            });
+          }
+          for (const server of servers) {
+            const tList = toolsByServer.get(server.id) || [];
+            server.tools = tList.map(t => ({ ...t, serverName: server.name }));
+          }
+        } catch (toolErr: any) {
+          console.warn("Failed to load mcp_tools from DB:", toolErr.message);
+        }
+      }
+
+      return servers;
     } catch (err: any) {
       console.warn("Failed to get MCP servers from DB:", err.message);
     }
@@ -694,10 +728,24 @@ export async function getMCPServersFromDB(userId?: string | null): Promise<any[]
   if (userId) {
     list = list.filter(s => !s.userId || s.userId === userId);
   }
-  return list.map(s => ({
-    ...s,
-    envVars: s.encryptedEnvVars ? JSON.parse(decryptSecret(s.encryptedEnvVars) || "{}") : (s.envVars || {}),
-  }));
+  return list.map(s => {
+    const tools = (localStore.mcp_tools || [])
+      .filter((t: any) => t.server_id === s.id)
+      .map((t: any) => ({
+        id: `${s.id}:${t.name}`,
+        name: t.name,
+        description: t.description,
+        inputSchema: t.input_schema || {},
+        serverId: s.id,
+        serverName: s.name,
+        enabled: t.enabled !== false,
+      }));
+    return {
+      ...s,
+      envVars: s.encryptedEnvVars ? JSON.parse(decryptSecret(s.encryptedEnvVars) || "{}") : (s.envVars || {}),
+      tools,
+    };
+  });
 }
 
 export async function createMCPServerInDB(data: {

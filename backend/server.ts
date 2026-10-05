@@ -17,9 +17,11 @@ import {
 import { providerManager, AIChatMessage } from "./services/ai/index.js";
 import { transcribeAudioWithSarvam } from "./services/speech.js";
 import { generateSpeechWithOpenAI } from "./services/tts.js";
-import { getLiveKitConfigStatus, createLiveKitToken } from "./services/livekit.js";
+import { getLiveKitConfigStatus, createLiveKitToken, generateVoiceRoomName } from "./services/livekit.js";
+import { voiceAgentService } from "./voice-agent/agent.js";
 import { 
   getMCPStatus, 
+  getMCPStatusAsync,
   fetchMCPTools, 
   mcpRegistry, 
   toolManager, 
@@ -331,21 +333,34 @@ app.post("/api/upload", async (req: any, res) => {
 // ==========================================
 
 app.get("/api/system/status", async (req, res) => {
+  const authenticatedUserId = (req as any).user ? (req as any).user.userId : null;
   const providerStatuses = providerManager.getProviderStatuses();
   const geminiConfigured = providerStatuses.gemini?.configured ?? false;
-  const sarvamConfigured = Boolean(apiKeyManager.getActiveKey("sarvam") || process.env.SARVAM_API_KEY);
+  const sarvamKey = apiKeyManager.getActiveKey("sarvam") || process.env.SARVAM_API_KEY || "";
+  const sarvamConfigured = Boolean(sarvamKey && sarvamKey.trim().length > 5 && !sarvamKey.startsWith("YOUR_"));
   const openAIConfigured = Boolean(apiKeyManager.getActiveKey("openai") || process.env.OPENAI_API_KEY);
   const livekitConfig = getLiveKitConfigStatus();
-  const mcpConfig = getMCPStatus();
+  const mcpConfig = await getMCPStatusAsync(authenticatedUserId);
 
   res.json({
     gemini: geminiConfigured ? "ready" : "not_configured",
-    voiceInput: sarvamConfigured ? "ready" : "unavailable",
+    voiceInput: sarvamConfigured ? "ready" : "not_configured",
+    sarvam: {
+      configured: sarvamConfigured,
+      model: process.env.SARVAM_MODEL || "saaras:v4",
+    },
     voiceOutput: openAIConfigured ? "ready" : "unavailable",
-    mcp: mcpConfig.isConfigured ? "ready" : "not_configured",
+    mcp: mcpConfig.status,
     livekit: livekitConfig.isConfigured ? "ready" : "not_configured",
     webSearch: "ready",
     providers: providerStatuses,
+    mcpDetails: {
+      isConfigured: mcpConfig.isConfigured,
+      totalServers: mcpConfig.totalServersCount,
+      activeServers: mcpConfig.activeServersCount,
+      connectedServers: mcpConfig.connectedCount,
+      toolsCount: mcpConfig.toolsCount,
+    },
   });
 });
 
@@ -353,33 +368,141 @@ app.get("/api/ai/models", async (req, res) => {
   res.json({ models: providerManager.getAllAvailableModels() });
 });
 
-// LiveKit Token Endpoint
+// LiveKit Token Endpoint (Realtime Voice Architecture)
 app.post("/api/livekit/token", async (req, res) => {
   try {
-    const { roomName = "friday-room", identity = `user-${Date.now()}` } = req.body;
-    const tokenData = await createLiveKitToken(roomName, identity);
+    const configStatus = getLiveKitConfigStatus();
+    if (!configStatus.isConfigured) {
+      return res.status(503).json({
+        isConfigured: false,
+        error: "LiveKit is not configured. Add LIVEKIT_URL, LIVEKIT_API_KEY, and LIVEKIT_API_SECRET to your server environment.",
+      });
+    }
+
+    // Authenticated user identity validation
+    const authenticatedUser = (req as any).user;
+    const authenticatedUserId = authenticatedUser?.userId;
+    const { 
+      conversationId, 
+      roomName: customRoomName, 
+      aiMode = "GENERAL", 
+      provider = "AUTO", 
+      model, 
+      fridayMode 
+    } = req.body;
+
+    // Secure deterministic room naming & identity
+    const userId = authenticatedUserId ? String(authenticatedUserId) : `guest-${Date.now()}`;
+    const safeConvId = conversationId ? String(conversationId).replace(/[^a-zA-Z0-9_-]/g, "") : "voice-session";
+    const roomName = customRoomName || generateVoiceRoomName(userId, safeConvId);
+    const identity = authenticatedUserId ? `user-${authenticatedUserId}` : `guest-${Date.now()}`;
+    const displayName = authenticatedUser?.name || authenticatedUser?.email || identity;
+
+    const tokenData = await createLiveKitToken({
+      roomName,
+      identity,
+      name: displayName,
+      metadata: {
+        userId: authenticatedUserId || null,
+        conversationId: safeConvId,
+        aiMode,
+        provider,
+        model,
+        fridayMode: Boolean(fridayMode),
+      },
+      ttlSeconds: 3600, // 1-hour short-lived participant token
+    });
+
+    // If Voice Agent service is ready, ensure agent joins room
+    if (voiceAgentService.isReady()) {
+      voiceAgentService.ensureAgentInRoom(roomName, {
+        userId: authenticatedUserId || null,
+        conversationId: safeConvId,
+        aiMode,
+        selectedProvider: provider,
+        selectedModel: model,
+        fridayMode: Boolean(fridayMode),
+      }).catch((agentErr) => {
+        console.warn(`[LiveKit Server] Warning attaching agent to room '${roomName}':`, agentErr.message);
+      });
+    }
+
     res.json(tokenData);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    const statusCode = error.code === "LIVEKIT_NOT_CONFIGURED" ? 503 : 500;
+    res.status(statusCode).json({ error: error.message, isConfigured: false });
   }
 });
 
-// Speech-to-Text Endpoint (Sarvam Saaras v3 STT)
+// Speech-to-Text Endpoint (Sarvam Saaras STT)
 app.post("/api/stt", async (req, res) => {
   try {
-    const { audioData, mimeType = "audio/webm" } = req.body;
-    if (!audioData) {
-      return res.status(400).json({ error: "audioData is required" });
+    const { audioData, mimeType = "audio/webm", languageCode, language } = req.body;
+
+    // 1. Validation: audioData exists and is non-empty string
+    if (!audioData || typeof audioData !== "string" || !audioData.trim()) {
+      return res.status(400).json({ error: "audioData is required and must be a valid base64 or data URL string" });
     }
 
+    // 2. MIME type validation
+    const cleanMime = (mimeType || "audio/webm").split(";")[0].toLowerCase().trim();
+    const allowedMimes = [
+      "audio/webm",
+      "audio/wav",
+      "audio/x-wav",
+      "audio/wave",
+      "audio/mp3",
+      "audio/mpeg",
+      "audio/ogg",
+      "audio/m4a",
+      "audio/aac",
+      "audio/mp4",
+      "audio/flac",
+    ];
+
+    if (!allowedMimes.includes(cleanMime)) {
+      return res.status(400).json({ 
+        error: `Unsupported audio MIME type: ${cleanMime}. Allowed formats: webm, wav, mp3, ogg, m4a, aac, flac.` 
+      });
+    }
+
+    // 3. Extract and parse base64
     const base64Content = audioData.includes(",") ? audioData.split(",")[1] : audioData;
     const buffer = Buffer.from(base64Content, "base64");
 
-    const transcript = await transcribeAudioWithSarvam(buffer, mimeType);
-    res.json({ transcript });
+    // 4. Validate size limits
+    if (buffer.length < 100) {
+      return res.status(400).json({ error: "Recorded audio is too short or empty." });
+    }
+    const maxAudioBytes = 25 * 1024 * 1024; // 25 MB limit
+    if (buffer.length > maxAudioBytes) {
+      return res.status(413).json({ error: "Audio data exceeds maximum size limit (25MB)." });
+    }
+
+    // 5. Check if Sarvam is configured before dispatching
+    const sarvamKey = apiKeyManager.getActiveKey("sarvam") || process.env.SARVAM_API_KEY;
+    if (!sarvamKey || sarvamKey.trim().length <= 5 || sarvamKey.startsWith("YOUR_")) {
+      return res.status(503).json({ 
+        error: "Sarvam Saaras STT is not configured on the server. Please set SARVAM_API_KEY in .env." 
+      });
+    }
+
+    // 6. Transcribe using Sarvam STT service
+    const selectedLanguage = languageCode || language;
+    const transcript = await transcribeAudioWithSarvam(buffer, mimeType, {
+      languageCode: selectedLanguage,
+    });
+
+    res.json({ transcript: transcript || "" });
   } catch (error: any) {
-    console.error("STT Endpoint error:", error.message);
-    res.status(500).json({ error: error.message });
+    const statusCode = error.statusCode || 500;
+    // Log sanitized error message without exposing keys or credentials
+    console.error(`[STT Endpoint Error] (${statusCode}):`, error.message);
+
+    // Return safe user-facing message
+    res.status(statusCode).json({ 
+      error: error.message || "Failed to transcribe audio. Please try again." 
+    });
   }
 });
 
@@ -441,9 +564,14 @@ app.get("/api/mcp/servers", async (req: any, res) => {
     
     // Merge DB records with live connection instances in mcpRegistry
     const serversWithStatus = dbServers.map((server) => {
-      const liveInstance = mcpRegistry.getInstance(server.id);
+      let liveInstance = mcpRegistry.getInstance(server.id);
+      if (!liveInstance && server.enabled) {
+        liveInstance = mcpRegistry.registerServer(server);
+      }
       const liveStatus = liveInstance ? liveInstance.getStatus() : server.status;
-      const liveTools = liveInstance ? liveInstance.getTools() : [];
+      const liveTools = liveInstance && liveInstance.getTools().length > 0 
+        ? liveInstance.getTools() 
+        : (server.tools || []);
       return {
         id: server.id,
         name: server.name,
@@ -1034,13 +1162,34 @@ async function startServer() {
       }
     }
 
-    // Connect enabled MCP servers in background
-    mcpRegistry.connectAll().then(() => {
-      const activeCount = mcpRegistry.getServers().filter(s => s.status === "connected").length;
-      console.log(`[MCP Registry]: Initialized ${mcpRegistry.getServers().length} servers (${activeCount} connected).`);
-    }).catch(err => {
-      console.warn("[MCP Registry]: Background connection error:", err.message);
-    });
+    // Reconnect enabled MCP servers automatically on startup
+    const enabledServers = mcpRegistry.getServers().filter((s) => s.enabled);
+    if (enabledServers.length > 0) {
+      console.log(`[MCP Startup]: Reconnecting ${enabledServers.length} enabled MCP server(s)...`);
+      const connectPromise = mcpRegistry.connectAll();
+      // Allow up to 6 seconds for initial connections to complete so tools are immediately ready on boot
+      const timeoutPromise = new Promise<{ total: number; connected: number; failed: number }>((resolve) =>
+        setTimeout(() => resolve({ total: enabledServers.length, connected: 0, failed: 0 }), 6000)
+      );
+
+      await Promise.race([connectPromise, timeoutPromise]);
+      const connectedCount = mcpRegistry.getServers().filter(s => s.status === "connected").length;
+      const totalTools = mcpRegistry.getAllTools().length;
+      console.log(`[MCP Registry]: Initialized ${mcpRegistry.getServers().length} server(s) (${connectedCount} connected, ${totalTools} tool(s) available).`);
+
+      // Ensure background reconnection finishes cleanly if timeout fired first
+      connectPromise
+        .then((res) => {
+          if (res.connected > connectedCount) {
+            console.log(`[MCP Registry]: Background reconnection finished: ${res.connected} connected.`);
+          }
+        })
+        .catch((err) => {
+          console.warn("[MCP Registry]: Background connection error:", err.message);
+        });
+    } else {
+      console.log(`[MCP Registry]: Initialized ${mcpRegistry.getServers().length} servers (0 enabled).`);
+    }
   } catch (mcpErr: any) {
     console.warn("[MCP Initialization Warning]:", mcpErr.message);
   }

@@ -1,5 +1,6 @@
 import { MCPServerConfig, MCPToolSummary, MCPServerStatus } from "./types.js";
 import { MCPClientInstance } from "./client.js";
+import { syncMCPToolsInDB, updateMCPServerInDB } from "../database.js";
 
 export class MCPServerRegistry {
   private instances: Map<string, MCPClientInstance> = new Map();
@@ -59,19 +60,40 @@ export class MCPServerRegistry {
 
   /**
    * Connect all enabled servers for a user or globally.
+   * Reconnects automatically, rediscovers tools, and synchronizes status to PostgreSQL.
    */
-  public async connectAll(userId?: string | null): Promise<void> {
+  public async connectAll(userId?: string | null): Promise<{ total: number; connected: number; failed: number }> {
     const servers = this.getServers(userId);
+    let connected = 0;
+    let failed = 0;
+
     await Promise.allSettled(
       servers.map(async (server) => {
         if (server.enabled) {
           const instance = this.instances.get(server.id);
           if (instance) {
-            await instance.connect();
+            try {
+              const ok = await instance.connect();
+              if (ok) {
+                connected++;
+                const tools = instance.getTools();
+                await syncMCPToolsInDB(server.id, tools).catch(() => {});
+                await updateMCPServerInDB(server.id, { status: "connected" }, server.userId).catch(() => {});
+              } else {
+                failed++;
+                await updateMCPServerInDB(server.id, { status: "error" }, server.userId).catch(() => {});
+              }
+            } catch (err: any) {
+              failed++;
+              console.warn(`[MCPRegistry] Connection failed for server '${server.name}':`, err.message);
+              await updateMCPServerInDB(server.id, { status: "error" }, server.userId).catch(() => {});
+            }
           }
         }
       })
     );
+
+    return { total: servers.length, connected, failed };
   }
 
   /**
@@ -85,14 +107,18 @@ export class MCPServerRegistry {
 
     const connected = await instance.connect();
     if (!connected) {
+      const errorMsg = instance.getLastError() || "Failed to connect to MCP server";
+      await updateMCPServerInDB(serverId, { status: "error" }, instance.getConfig().userId).catch(() => {});
       return {
         success: false,
-        tools: [],
-        error: instance.getLastError() || "Failed to connect to MCP server",
+        tools: instance.getTools(),
+        error: errorMsg,
       };
     }
 
     const tools = await instance.discoverTools();
+    await syncMCPToolsInDB(serverId, tools).catch(() => {});
+    await updateMCPServerInDB(serverId, { status: "connected" }, instance.getConfig().userId).catch(() => {});
     return { success: true, tools };
   }
 
@@ -105,7 +131,12 @@ export class MCPServerRegistry {
       if (cfg.enabled && (!userId || !cfg.userId || cfg.userId === userId)) {
         if (instance.getStatus() !== "connected" || instance.getTools().length === 0) {
           try {
-            await instance.connect();
+            const ok = await instance.connect();
+            if (ok) {
+              const tools = instance.getTools();
+              await syncMCPToolsInDB(cfg.id, tools).catch(() => {});
+              await updateMCPServerInDB(cfg.id, { status: "connected" }, cfg.userId).catch(() => {});
+            }
           } catch (e: any) {
             console.warn(`[MCPRegistry] Auto-connect server '${cfg.name}' warning:`, e.message);
           }

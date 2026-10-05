@@ -72,9 +72,26 @@ export interface AIProviderStatus {
   models: string[];
 }
 
+export type VoiceInputStatus = "idle" | "listening" | "processing" | "transcribing" | "done" | "error";
+
+export type LiveKitVoiceState =
+  | "IDLE"
+  | "CONNECTING"
+  | "LISTENING"
+  | "PROCESSING"
+  | "THINKING"
+  | "SPEAKING"
+  | "INTERRUPTED"
+  | "DISCONNECTED"
+  | "ERROR";
+
 export interface SystemCapabilityStatus {
   gemini: "ready" | "unavailable" | "not_configured";
   voiceInput: "ready" | "unavailable" | "not_configured";
+  sarvam?: {
+    configured: boolean;
+    model?: string;
+  };
   voiceOutput: "ready" | "unavailable" | "not_configured";
   mcp: "ready" | "unavailable" | "not_configured";
   livekit: "ready" | "unavailable" | "not_configured";
@@ -90,6 +107,7 @@ export interface UserSettings {
   speechSpeed: number; // 0.5 to 2.0
   volume: number; // 0 to 1
   selectedMicId: string;
+  speechLanguage?: string;
   selectedModel: string;
   selectedProvider: "AUTO" | "gemini" | "qwen" | "openai";
   webSearchEnabled: boolean;

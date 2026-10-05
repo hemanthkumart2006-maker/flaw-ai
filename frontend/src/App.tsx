@@ -145,15 +145,19 @@ export default function App() {
 
   // Voice Input Hook
   const { 
+    status: voiceStatus,
     isRecording, 
     isProcessing: isProcessingVoice, 
     audioLevel, 
+    errorState: voiceError,
     startRecording: startVoiceRecording,
     stopRecording: stopVoiceRecording,
     toggleRecording 
   } = useVoiceInput({
     deviceId: settings.selectedMicId,
     enableVAD: voiceMode === "hands-free",
+    languageCode: settings.speechLanguage || "unknown",
+    isSarvamConfigured: systemStatus?.voiceInput === "ready",
     onTranscript: (transcriptText) => {
       if (voiceModeRef.current === "hands-free" && transcriptText.trim()) {
         sendMessage(transcriptText.trim(), "");
@@ -163,7 +167,38 @@ export default function App() {
     },
   });
 
-  const { isConnected: livekitConnected } = useLiveKit();
+  // Realtime LiveKit AI Voice Agent Hook
+  const {
+    voiceState: livekitVoiceState,
+    isConnected: livekitConnected,
+    isConnecting: livekitConnecting,
+    isMuted: livekitMuted,
+    audioLevel: livekitAudioLevel,
+    agentAudioLevel: livekitAgentAudioLevel,
+    error: livekitError,
+    activeToolActivity: livekitToolActivity,
+    transcripts: livekitTranscripts,
+    lastUserTranscript: livekitUserTranscript,
+    lastAgentTranscript: livekitAgentTranscript,
+    connectToLiveKit,
+    disconnectFromLiveKit,
+    toggleMute: toggleLiveKitMute,
+    interruptAgent: interruptLiveKitAgent,
+  } = useLiveKit();
+
+  const handleToggleLiveKit = () => {
+    if (livekitConnected || livekitConnecting) {
+      disconnectFromLiveKit();
+    } else {
+      connectToLiveKit({
+        conversationId: currentChatId,
+        aiMode,
+        selectedProvider: settings.selectedProvider,
+        selectedModel,
+        fridayMode,
+      });
+    }
+  };
 
   // Apply Theme Attribute
   useEffect(() => {
@@ -333,6 +368,21 @@ export default function App() {
           <div ref={messagesEndRef} />
         </div>
 
+        {/* LiveKit Error / Status Notification */}
+        {livekitError && (
+          <div className="mx-auto max-w-4xl px-4 pb-2">
+            <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2 text-xs text-amber-300 flex items-center justify-between">
+              <span>⚠️ <strong>LiveKit Voice Notice:</strong> {livekitError}</span>
+              <button 
+                onClick={() => disconnectFromLiveKit()}
+                className="text-[11px] underline hover:text-white"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Input Bar */}
         <ChatInput
           input={input}
@@ -346,10 +396,20 @@ export default function App() {
           isLoading={isLoading}
           isListening={isRecording}
           isProcessingVoice={isProcessingVoice}
+          voiceStatus={voiceStatus}
+          voiceError={voiceError}
           audioLevel={audioLevel}
           onToggleListening={toggleRecording}
           voiceMode={voiceMode}
-          toolStatus={toolStatus}
+          toolStatus={livekitToolActivity ? `Live Voice Tool: ${livekitToolActivity}...` : toolStatus}
+          livekitConnected={livekitConnected}
+          livekitConnecting={livekitConnecting}
+          livekitState={livekitVoiceState}
+          livekitAudioLevel={livekitAudioLevel}
+          livekitMuted={livekitMuted}
+          onToggleLiveKit={handleToggleLiveKit}
+          onToggleLiveKitMute={toggleLiveKitMute}
+          onInterruptLiveKit={interruptLiveKitAgent}
         />
       </div>
 
@@ -362,10 +422,12 @@ export default function App() {
             isListening={isRecording}
             isProcessing={isProcessingVoice}
             isPlayingAudio={isPlayingAudio}
-            audioLevel={audioLevel}
+            audioLevel={livekitConnected ? (livekitVoiceState === "SPEAKING" ? livekitAgentAudioLevel : livekitAudioLevel) : audioLevel}
             onToggleListening={toggleRecording}
             onStopAudio={stopAudio}
             livekitConnected={livekitConnected}
+            livekitState={livekitVoiceState}
+            onLiveKitInterrupt={interruptLiveKitAgent}
           />
         </ErrorBoundary>
       )}

@@ -1,7 +1,7 @@
 import React from "react";
 import { Mic, MicOff, Volume2, Square, X, Sparkles, Radio } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { VoiceMode } from "../types";
+import { VoiceMode, LiveKitVoiceState } from "../types";
 
 interface FridayVoiceWidgetProps {
   voiceMode: VoiceMode;
@@ -13,6 +13,8 @@ interface FridayVoiceWidgetProps {
   onToggleListening: () => void;
   onStopAudio: () => void;
   livekitConnected: boolean;
+  livekitState?: LiveKitVoiceState;
+  onLiveKitInterrupt?: () => void;
 }
 
 export const FridayVoiceWidget: React.FC<FridayVoiceWidgetProps> = ({
@@ -25,6 +27,8 @@ export const FridayVoiceWidget: React.FC<FridayVoiceWidgetProps> = ({
   onToggleListening,
   onStopAudio,
   livekitConnected,
+  livekitState,
+  onLiveKitInterrupt,
 }) => {
   if (voiceMode === "chat") return null;
 
@@ -46,11 +50,11 @@ export const FridayVoiceWidget: React.FC<FridayVoiceWidgetProps> = ({
           </div>
 
           <div className="flex items-center gap-1">
-            {livekitConnected && (
-              <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 text-[10px] font-bold rounded-full flex items-center gap-1">
-                <Radio className="w-3 h-3 animate-pulse" /> LiveKit
+            {livekitConnected ? (
+              <span className="px-2.5 py-0.5 bg-red-500/20 text-red-300 border border-red-500/30 text-[10px] font-bold rounded-full flex items-center gap-1 shadow-sm">
+                <Radio className="w-3 h-3 animate-pulse text-red-400" /> LIVE {livekitState && `• ${livekitState}`}
               </span>
-            )}
+            ) : null}
             <button
               onClick={() => setVoiceMode("chat")}
               className="p-1 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white transition-colors"
@@ -110,7 +114,17 @@ export const FridayVoiceWidget: React.FC<FridayVoiceWidgetProps> = ({
             <span>{isListening ? "Stop Mic" : "Start Speaking"}</span>
           </button>
 
-          {isPlayingAudio && (
+          {livekitConnected && (livekitState === "SPEAKING" || isPlayingAudio) && onLiveKitInterrupt && (
+            <button
+              onClick={onLiveKitInterrupt}
+              className="py-2.5 px-3 bg-amber-500 hover:bg-amber-400 text-black font-extrabold rounded-xl transition-all shadow-lg active:scale-95 text-xs flex items-center gap-1"
+              title="Interrupt AI Speech"
+            >
+              <span>Interrupt</span>
+            </button>
+          )}
+
+          {isPlayingAudio && !livekitConnected && (
             <button
               onClick={onStopAudio}
               className="p-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl transition-colors"

@@ -37,6 +37,14 @@ export function createMCPTransport(config: MCPServerConfig): Transport {
     const childEnv: Record<string, string> = {
       PATH: process.env.PATH || "",
       HOME: process.env.HOME || process.env.USERPROFILE || "",
+      USERPROFILE: process.env.USERPROFILE || "",
+      SystemRoot: process.env.SystemRoot || "C:\\Windows",
+      APPDATA: process.env.APPDATA || "",
+      LOCALAPPDATA: process.env.LOCALAPPDATA || "",
+      COMSPEC: process.env.COMSPEC || "",
+      PATHEXT: process.env.PATHEXT || "",
+      TEMP: process.env.TEMP || "",
+      TMP: process.env.TMP || "",
       NODE_ENV: process.env.NODE_ENV || "development",
       ...(config.envVars || {}),
     };

@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { Mic, MicOff, Volume2, Square, X, Sparkles, Maximize2, Minimize2, Radio, Eye } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { VoiceMode } from "../types";
+import { VoiceMode, LiveKitVoiceState } from "../types";
 
 export type AssistantState = "idle" | "listening" | "thinking" | "speaking";
 
@@ -16,6 +16,8 @@ interface AnimeAssistant3DProps {
   onToggleListening: () => void;
   onStopAudio: () => void;
   livekitConnected?: boolean;
+  livekitState?: LiveKitVoiceState;
+  onLiveKitInterrupt?: () => void;
 }
 
 export const AnimeAssistant3D: React.FC<AnimeAssistant3DProps> = ({
@@ -28,19 +30,34 @@ export const AnimeAssistant3D: React.FC<AnimeAssistant3DProps> = ({
   onToggleListening,
   onStopAudio,
   livekitConnected,
+  livekitState,
+  onLiveKitInterrupt,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [isExpanded, setIsExpanded] = useState(false);
   const [viewMode, setViewMode] = useState<"3d" | "waveform">("3d");
 
-  // Determine current active assistant state
-  const assistantState: AssistantState = isPlayingAudio 
-    ? "speaking" 
-    : isProcessing 
-    ? "thinking" 
-    : isListening 
-    ? "listening" 
-    : "idle";
+  // Determine current active assistant state (seamlessly mapping LiveKit voice states)
+  let assistantState: AssistantState = "idle";
+  if (livekitConnected && livekitState) {
+    if (livekitState === "SPEAKING") {
+      assistantState = "speaking";
+    } else if (livekitState === "THINKING" || livekitState === "PROCESSING" || livekitState === "CONNECTING") {
+      assistantState = "thinking";
+    } else if (livekitState === "LISTENING" || livekitState === "INTERRUPTED") {
+      assistantState = "listening";
+    } else {
+      assistantState = "idle";
+    }
+  } else {
+    assistantState = isPlayingAudio 
+      ? "speaking" 
+      : isProcessing 
+      ? "thinking" 
+      : isListening 
+      ? "listening" 
+      : "idle";
+  }
 
   // Three.js animation refs
   const stateRef = useRef<AssistantState>(assistantState);
@@ -330,9 +347,10 @@ export const AnimeAssistant3D: React.FC<AnimeAssistant3DProps> = ({
         headGroup.rotation.x = Math.sin(time * 5) * 0.05;
         headGroup.rotation.y = Math.sin(time * 2.5) * 0.06;
 
-        // Dynamic mouth movement (lip sync simulation)
-        const mouthOpen = 0.4 + Math.abs(Math.sin(time * 16)) * 1.2;
-        mouthMesh.scale.set(1.1, mouthOpen, 1);
+        // Dynamic mouth movement (lip sync simulation driven by real audio amplitude)
+        const audioAmp = currentLevel > 0 ? currentLevel / 100 : 0.5;
+        const mouthOpen = 0.3 + (Math.abs(Math.sin(time * 16)) * 0.8 + audioAmp * 1.6) * 0.7;
+        mouthMesh.scale.set(1.1, Math.min(2.5, mouthOpen), 1);
 
         // Vibrant speaking aura
         haloMat.color.setHex(0x6366f1); // Indigo voice emission
@@ -478,12 +496,12 @@ export const AnimeAssistant3D: React.FC<AnimeAssistant3DProps> = ({
               assistantState === "listening" ? "bg-amber-400 animate-pulse" :
               assistantState === "thinking" ? "bg-purple-400 animate-spin" : "bg-emerald-400"
             }`} />
-            <span>{assistantState.toUpperCase()}</span>
+            <span>{livekitConnected && livekitState ? livekitState : assistantState.toUpperCase()}</span>
           </div>
 
           {livekitConnected && (
-            <div className="absolute top-2.5 right-2.5 px-2 py-0.5 bg-emerald-500/20 text-emerald-300 text-[10px] font-bold rounded-full flex items-center gap-1">
-              <Radio className="w-3 h-3 animate-pulse" /> LiveKit
+            <div className="absolute top-2.5 right-2.5 px-2.5 py-0.5 bg-red-500/20 text-red-300 border border-red-500/30 text-[10px] font-bold rounded-full flex items-center gap-1 shadow-sm">
+              <Radio className="w-3 h-3 animate-pulse text-red-400" /> LIVE
             </div>
           )}
         </div>
@@ -502,7 +520,18 @@ export const AnimeAssistant3D: React.FC<AnimeAssistant3DProps> = ({
             <span>{isListening ? "Stop Listening" : "Speak to Assistant"}</span>
           </button>
 
-          {isPlayingAudio && (
+          {/* Barge-in / Interruption Button for LiveKit Voice */}
+          {livekitConnected && assistantState === "speaking" && onLiveKitInterrupt && (
+            <button
+              onClick={onLiveKitInterrupt}
+              className="py-2.5 px-3 bg-amber-500 hover:bg-amber-400 text-black font-extrabold rounded-xl transition-all shadow-lg active:scale-95 text-xs flex items-center gap-1"
+              title="Interrupt AI Speech (Barge-in)"
+            >
+              <span>Interrupt</span>
+            </button>
+          )}
+
+          {isPlayingAudio && !livekitConnected && (
             <button
               onClick={onStopAudio}
               className="p-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl transition-colors active:scale-95"

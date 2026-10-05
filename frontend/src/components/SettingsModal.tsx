@@ -285,21 +285,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       { label: "Search Grounding", status: systemStatus?.webSearch },
                       { label: "MCP Protocol", status: systemStatus?.mcp },
                       { label: "LiveKit WebRTC", status: systemStatus?.livekit },
-                    ].map((cap, i) => (
-                      <div key={i} className="p-3 bg-[#18181f] border border-white/10 rounded-2xl space-y-1">
-                        <span className="text-[11px] font-bold text-slate-300 block">{cap.label}</span>
-                        <span
-                          className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full inline-flex items-center gap-1 ${
-                            cap.status === "ready"
-                              ? "bg-emerald-500/20 text-emerald-400"
-                              : "bg-amber-500/20 text-amber-400"
-                          }`}
-                        >
-                          {cap.status === "ready" ? <CheckCircle2 className="w-3 h-3" /> : <AlertCircle className="w-3 h-3" />}
-                          {cap.status || "Check..."}
-                        </span>
-                      </div>
-                    ))}
+                    ].map((cap, i) => {
+                      const isReady = cap.status === "ready";
+                      const isNotConfigured = cap.status === "not_configured";
+                      return (
+                        <div key={i} className="p-3 bg-[#18181f] border border-white/10 rounded-2xl space-y-1">
+                          <span className="text-[11px] font-bold text-slate-300 block">{cap.label}</span>
+                          <span
+                            className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full inline-flex items-center gap-1 ${
+                              isReady
+                                ? "bg-emerald-500/20 text-emerald-400"
+                                : isNotConfigured
+                                ? "bg-zinc-800 text-zinc-400"
+                                : "bg-amber-500/20 text-amber-400"
+                            }`}
+                          >
+                            {isReady ? <CheckCircle2 className="w-3 h-3" /> : <AlertCircle className="w-3 h-3" />}
+                            {isReady ? "Ready" : isNotConfigured ? "Not Configured" : cap.status?.replace("_", " ") || "Check..."}
+                          </span>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -394,6 +400,47 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         className="w-4 h-4 accent-indigo-600 rounded cursor-pointer"
                       />
                     </div>
+
+                    {/* Sarvam STT Language Selection */}
+                    <div className="space-y-1.5 sm:col-span-2">
+                      <div className="flex items-center justify-between">
+                        <label className="font-bold text-slate-200">Speech Recognition Language</label>
+                        <span className="text-[10px] text-indigo-400 font-semibold">Sarvam Saaras STT & Web Speech</span>
+                      </div>
+                      <select
+                        value={settings.speechLanguage || "unknown"}
+                        onChange={(e) => updateSetting("speechLanguage", e.target.value)}
+                        className="w-full bg-[#18181f] border border-white/10 rounded-xl p-2 text-xs text-white focus:outline-none focus:border-indigo-500"
+                      >
+                        <option value="unknown">Auto-Detect (Sarvam Indic & English)</option>
+                        <option value="en-IN">English (India) [en-IN]</option>
+                        <option value="hi-IN">Hindi [hi-IN]</option>
+                        <option value="bn-IN">Bengali [bn-IN]</option>
+                        <option value="ta-IN">Tamil [ta-IN]</option>
+                        <option value="te-IN">Telugu [te-IN]</option>
+                        <option value="mr-IN">Marathi [mr-IN]</option>
+                        <option value="gu-IN">Gujarati [gu-IN]</option>
+                        <option value="kn-IN">Kannada [kn-IN]</option>
+                        <option value="ml-IN">Malayalam [ml-IN]</option>
+                        <option value="pa-IN">Punjabi [pa-IN]</option>
+                        <option value="od-IN">Odia [od-IN]</option>
+                        <option value="as-IN">Assamese [as-IN]</option>
+                        <option value="ur-IN">Urdu [ur-IN]</option>
+                      </select>
+                    </div>
+
+                    {/* Status hint if Sarvam is not configured */}
+                    {systemStatus?.voiceInput === "not_configured" && (
+                      <div className="sm:col-span-2 p-3 bg-zinc-900/80 border border-white/10 rounded-2xl text-[11px] text-slate-400 flex items-start gap-2">
+                        <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                        <div>
+                          <p className="font-bold text-slate-300">Sarvam Saaras STT: Not Configured</p>
+                          <p className="text-[10px] text-slate-400">
+                            Browser Web Speech API is active as an automatic fallback. To enable Sarvam Saaras AI transcription, add <code className="text-indigo-400">SARVAM_API_KEY</code> in server <code className="text-slate-300">.env</code>.
+                          </p>
+                        </div>
+                      </div>
+                    )}
 
                     <div className="space-y-1.5 sm:col-span-2">
                       <label className="font-bold text-slate-200">OpenAI TTS Voice</label>
